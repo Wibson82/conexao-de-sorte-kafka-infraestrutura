@@ -48,12 +48,11 @@ services:
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test: >
-        ["CMD", "bash", "-c", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 60s
       timeout: 30s
-      retries: 3
-      start_period: 180s
+      retries: 5
+      start_period: 240s
     deploy:
       replicas: 1
       placement:

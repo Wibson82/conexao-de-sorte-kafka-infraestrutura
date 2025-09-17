@@ -1,47 +1,87 @@
-version: '3.9'
+---
+# ============================================================================
+# 🔥 CONEXÃO DE SORTE - KAFKA INFRAESTRUTURA
+# ============================================================================
+# Data de Criação: 17/09/2025 às 04:25 BRT
+# Última Atualização: 17/09/2025 às 04:25 BRT
+# Responsável: Sistema Automatizado
+# Versão: 1.0.0
+# ============================================================================
+#
+# KAFKA STANDALONE - Message Streaming Platform
+# - Docker Swarm deployment
+# - Overlay encrypted network para segurança
+# - Named volumes com placement constraints
+# - Health checks otimizados para produção
+# - Dependência externa do Zookeeper via network
+# ============================================================================
 
 services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.7.0
-    container_name: conexao-zookeeper
-    restart: unless-stopped
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - conexao-network
-    healthcheck:
-      test: ["CMD", "/bin/bash", "-lc", "echo ruok | nc -w 2 localhost 2181 | grep imok"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
+  # ============================================================================
+  # 🔥 KAFKA - Event Streaming Platform
+  # ============================================================================
   kafka:
-    image: confluentinc/cp-kafka:7.7.0
-    container_name: conexao-kafka
-    restart: unless-stopped
-    depends_on:
-      - zookeeper
+    image: confluentinc/cp-kafka:7.9.0
+    hostname: conexao-kafka
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ZOOKEEPER_CONNECT: conexao-zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://conexao-kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 536870912
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+      KAFKA_ZOOKEEPER_CONNECTION_TIMEOUT_MS: 60000
+      KAFKA_ZOOKEEPER_SESSION_TIMEOUT_MS: 60000
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_NUM_PARTITIONS: 3
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
     networks:
-      - conexao-network
+      conexao-network-swarm:
+        aliases:
+          - conexao-kafka
+          - kafka
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "bash", "-lc", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      test: >
+        ["CMD", "bash", "-c", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 180s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 5
+        window: 300s
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
-networks:
-  conexao-network:
-    name: conexao-network
+# ============================================================================
+# 📦 VOLUMES EXTERNOS
+# ============================================================================
+volumes:
+  kafka_data:
     external: true
+    name: kafka_data
 
+# ============================================================================
+# 🌐 NETWORKS EXTERNOS
+# ============================================================================
+networks:
+  conexao-network-swarm:
+    external: true
+    name: conexao-network-swarm

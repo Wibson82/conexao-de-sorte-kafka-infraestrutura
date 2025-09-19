@@ -32,6 +32,7 @@
 - Redução de comandos exec dentro de containers
 - Tratamento defensivo de falhas de dependência
 - Timeouts otimizados (previne hangs)
+- Inventário de segredos documentado em `docs/secrets-usage-map.md` (auditoria 19/09/2025).
 
 ### ⚡ **MELHORIAS DE PERFORMANCE**
 - Cleanup mais rápido (15s → 10s)

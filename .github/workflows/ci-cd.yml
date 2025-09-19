@@ -38,6 +38,11 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: 📋 Confirmar consumo mínimo do Key Vault
+        if: vars.AZURE_KEYVAULT_NAME != ''
+        run: |
+          echo 'Job de validação não consome segredos do Key Vault (lista vazia).'
+
       - name: Ensure Python deps
         shell: bash
         run: |
@@ -98,6 +103,11 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: 📋 Confirmar consumo mínimo do Key Vault
+        if: vars.AZURE_KEYVAULT_NAME != ''
+        run: |
+          echo 'Deploy do Kafka não consome segredos do Key Vault (lista vazia).'
 
       - name: Download artifacts
         uses: actions/download-artifact@v4.1.8

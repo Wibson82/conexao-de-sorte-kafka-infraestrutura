@@ -25,3 +25,4 @@
 - Atualize este arquivo antes de adicionar qualquer segredo novo no Key Vault.
 - Runners devem incluir as labels `[self-hosted, Linux, X64, srv649924, conexao-de-sorte-kafka-infraestrutura]`.
 - Use `::add-mask::` sempre que expor valores sensíveis em variáveis ou outputs.
+- Serviço roda como UID/GID 1000 dentro do Swarm; certifique-se de ajustar permissões do volume externo `kafka_data`.

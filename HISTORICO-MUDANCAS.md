@@ -1,5 +1,18 @@
 # 📋 HISTÓRICO DE MUDANÇAS - KAFKA INFRAESTRUTURA
 
+## 🗓️ **19/09/2025 - Auditoria Hostinger + hardening rootless**
+
+### ✅ **MUDANÇAS REALIZADAS**
+- Workflows migrados para runner `[self-hosted, Linux, X64, srv649924, conexao-de-sorte-kafka-infraestrutura]` com OIDC mínimo.
+- Compose endurecido (rootless, `update_config`/`rollback_config`, logging limitado).
+- Documentação e checklist adicionados em `docs/`.
+
+### 🧪 **VALIDAÇÕES**
+- `actionlint -config-file .github/actionlint.yaml --shellcheck=`
+- `docker compose -f docker-compose.yml config -q`
+- `hadolint` indisponível; sem Dockerfile para build local.
+
+---
 ## 🗓️ **18/09/2025 - Refatoração Health Checks e Dependências**
 
 ### ✅ **MUDANÇAS REALIZADAS**

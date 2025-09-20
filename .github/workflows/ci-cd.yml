@@ -1,4 +1,4 @@
-name: "🔥 Kafka Infrastructure – CI/CD Pipeline"
+name: "🚀 Kafka Infrastructure – CI/CD Pipeline"
 
 on:
   push:
@@ -11,12 +11,15 @@ permissions:
   contents: read
   id-token: write
 
-env:
-  SERVICE_NAME: kafka-infrastructure
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  SERVICE_NAME: kafka-infrastructure
+  STACK_NAME: conexao-kafka
+  DOCKER_NETWORK_NAME: conexao-network-swarm
+  KAFKA_DATA_VOLUME: kafka_data
 
 jobs:
   validate-and-build:
@@ -25,171 +28,194 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      has_keyvault: ${{ steps.check_secrets.outputs.has_keyvault }}
+      has_azure_creds: ${{ steps.check_secrets.outputs.has_azure_creds }}
     steps:
-      - uses: actions/checkout@v4.3.0
-
-      - name: Azure Login (OIDC)
-        if: >-
-          ${{ vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' &&
-              vars.AZURE_SUBSCRIPTION_ID != '' }}
-        uses: azure/login@v2
+      - name: Checkout
+        uses: actions/checkout@v4.3.0
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          fetch-depth: 1
 
-      - name: 📋 Confirmar consumo mínimo do Key Vault
-        if: vars.AZURE_KEYVAULT_NAME != ''
+      - name: Install dependencies
         run: |
-          echo 'Job de validação não consome segredos do Key Vault (lista vazia).'
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-yaml jq
 
-      - name: Ensure Python deps
-        shell: bash
+      - name: 🔎 Validar identificadores Azure (vars)
+        id: check_secrets
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_KEYVAULT_NAME: ${{ secrets.AZURE_KEYVAULT_NAME }}
+          AZURE_KEYVAULT_ENDPOINT: ${{ secrets.AZURE_KEYVAULT_ENDPOINT }}
         run: |
-          set -euo pipefail
-          if ! command -v python3 >/dev/null 2>&1; then
-            echo 'python3 não está disponível no runner; instale manualmente.' >&2
+          set -Eeuo pipefail
+          missing=()
+          for var in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
+            if [[ -z "${!var:-}" ]]; then
+              missing+=("$var")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            printf '❌ GitHub Secrets obrigatórios ausentes: %s\n' "${missing[*]}"
             exit 1
           fi
-          python3 -c "import importlib, subprocess, sys\ntry:\n    importlib.import_module('yaml')\nexcept ModuleNotFoundError:\n    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--user', 'PyYAML'])"
+          echo "::add-mask::${AZURE_CLIENT_ID}"
+          echo "::add-mask::${AZURE_TENANT_ID}"
+          echo "::add-mask::${AZURE_SUBSCRIPTION_ID}"
+          echo "has_azure_creds=true" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "${AZURE_KEYVAULT_NAME:-}" ]]; then
+            echo "::add-mask::${AZURE_KEYVAULT_NAME}"
+            echo "has_keyvault=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keyvault=false" >> "$GITHUB_OUTPUT"
+            echo 'ℹ️ Key Vault não configurado para Kafka (sem segredos OIDC)'
+          fi
+
+          if [[ -n "${AZURE_KEYVAULT_ENDPOINT:-}" ]]; then
+            echo "::add-mask::${AZURE_KEYVAULT_ENDPOINT}"
+          fi
 
       - name: Validate Docker Compose
         run: |
-          # Validar sintaxe do docker-compose.yml
           docker compose -f docker-compose.yml config -q
-          echo "✅ Docker Compose syntax is valid"
+          echo "✅ docker-compose.yml syntax ok"
 
-      - name: Security Validation
+      - name: Security validation
         run: |
-          # Verificar se não há hardcoded passwords
-          if grep -r "password.*:" docker-compose.yml | grep -v "\${" | grep -v "#" | grep -v "external:"; then
-            echo "❌ Found potential hardcoded passwords"
+          set -Eeuo pipefail
+          if grep -R "password[[:space:]]*:" docker-compose.yml | grep -v '\${' | grep -v '^#' | grep -v 'external:'; then
+            echo "❌ Possible hardcoded password detected"
             exit 1
-          else
-            echo "✅ No hardcoded passwords found"
           fi
+          echo "✅ No hardcoded passwords detected"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4.5.0
-        with:
-          name: kafka-configs
-          path: |
-            docker-compose.yml
+          if grep -Eq "^\s*-\s*'?9092:'?" docker-compose.yml; then
+            echo "⚠️ Porta 9092 mapeada externamente; revise necessidade"
+          else
+            echo "✅ Porta 9092 não exposta externamente"
+          fi
 
   deploy-selfhosted:
     needs: validate-and-build
-    runs-on: [ self-hosted, Linux, X64, srv649924, conexao-de-sorte-kafka-infraestrutura ]
-    timeout-minutes: 15
+    runs-on: [ self-hosted, Linux, X64, conexao-de-sorte-kafka-infraestrutura ]
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       id-token: write
-    if: github.ref == 'refs/heads/main'
-    env:
-      DOCKER_NETWORK_NAME: conexao-network-swarm
-      STACK_NAME: conexao-kafka
-      COMPOSE_FILE: docker-compose.yml
     steps:
-      - uses: actions/checkout@v4.3.0
+      - name: Checkout
+        uses: actions/checkout@v4.3.0
         with:
           clean: true
           fetch-depth: 1
 
-      - name: Azure Login (OIDC)
-        if: >-
-          ${{ vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' &&
-              vars.AZURE_SUBSCRIPTION_ID != '' }}
+      - name: 🔍 Diagnósticos iniciais
+        run: |
+          set -Eeuo pipefail
+          echo "🔍 Verificando arquivos necessários..."
+          for required_file in "docker-compose.yml"; do
+            if [[ -f "$required_file" ]]; then
+              echo "✅ $required_file encontrado"
+            else
+              echo "❌ $required_file NÃO encontrado"
+              exit 1
+            fi
+          done
+          echo "ℹ️ Kafka não requer diretórios locais obrigatórios"
+
+      - name: 🔐 Azure Login (OIDC)
+        if: ${{ needs.validate-and-build.outputs.has_azure_creds == 'true' }}
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: 📋 Confirmar consumo mínimo do Key Vault
-        if: vars.AZURE_KEYVAULT_NAME != ''
+      - name: 🔴 Deploy Kafka Stack (Swarm-Only)
+        env:
+          STACK_NAME: ${{ env.STACK_NAME }}
+          DOCKER_NETWORK_NAME: ${{ env.DOCKER_NETWORK_NAME }}
+          KAFKA_DATA_VOLUME: ${{ env.KAFKA_DATA_VOLUME }}
         run: |
-          echo 'Deploy do Kafka não consome segredos do Key Vault (lista vazia).'
+          set -Eeuo pipefail
+          compose_file="docker-compose.yml"
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4.1.8
-        with:
-          name: kafka-configs
-          path: .
-
-      - name: 🔍 Validate Zookeeper Dependency (Soft Check)
-        run: |
-          echo "🔍 Verificando se Zookeeper está disponível..."
-
-          # Verificar se Zookeeper está rodando na rede (soft dependency)
-          if docker service ls | grep -q "conexao-zookeeper_zookeeper"; then
-            echo "✅ Zookeeper encontrado no Swarm - prosseguindo"
+          echo "🔍 Garantindo recursos básicos (rede, volumes)..."
+          if ! docker network ls --format '{{.Name}}' | grep -Fxq "$DOCKER_NETWORK_NAME"; then
+            echo "⚠️ Rede '$DOCKER_NETWORK_NAME' não encontrada - criando overlay attachable"
+            docker network create --driver overlay --attachable "$DOCKER_NETWORK_NAME"
+            echo "✅ Rede '$DOCKER_NETWORK_NAME' criada"
           else
-            echo "⚠️ Zookeeper não encontrado no Swarm"
-            echo "💡 Nota: Kafka funciona melhor com Zookeeper em execução"
-            echo "💡 Para deploy do Zookeeper: conexao-de-sorte-zookeeper-infraestrutura"
-            echo "🔄 Continuando deploy do Kafka (pode falhar se Zookeeper for obrigatório)..."
+            echo "✅ Rede '$DOCKER_NETWORK_NAME' já existe"
           fi
 
-      - name: 🚀 Deploy Kafka Stack (Swarm-Only)
-        env:
-          STACK_NAME: conexao-kafka
-          COMPOSE_FILE: docker-compose.yml
-        run: |
-          echo "🚀 Iniciando deploy do Kafka com Docker Swarm..."
+          if [[ -n "$KAFKA_DATA_VOLUME" ]]; then
+            if ! docker volume ls --format '{{.Name}}' | grep -Fxq "$KAFKA_DATA_VOLUME"; then
+              echo "⚠️ Volume '$KAFKA_DATA_VOLUME' não encontrado - criando volume externo"
+              docker volume create --name "$KAFKA_DATA_VOLUME"
+              echo "✅ Volume '$KAFKA_DATA_VOLUME' criado"
+            else
+              echo "✅ Volume '$KAFKA_DATA_VOLUME' já existe"
+            fi
+          fi
 
-          # Remover stack existente se houver
-          if docker stack ls | grep -q "$STACK_NAME"; then
+          if docker stack ls --format '{{.Name}}' | grep -Fxq "$STACK_NAME"; then
             echo "🔄 Removendo stack existente '$STACK_NAME'..."
             docker stack rm "$STACK_NAME"
-            sleep 10  # Kafka cleanup otimizado
+            echo "⏳ Aguardando remoção completa da stack '$STACK_NAME'..."
+            for _ in $(seq 1 36); do
+              if ! docker stack ls --format '{{.Name}}' | grep -Fxq "$STACK_NAME"; then
+                echo "✅ Stack '$STACK_NAME' removida"
+                break
+              fi
+              sleep 5
+            done
           fi
 
-          # Deploy da nova stack
           echo "🏗️ Executando deploy da stack '$STACK_NAME'..."
-          docker stack deploy -c "$COMPOSE_FILE" "$STACK_NAME"
-
+          docker stack deploy -c "$compose_file" "$STACK_NAME"
           echo "⏰ Aguardando estabilização dos serviços Kafka..."
-          sleep 45  # Kafka inicialização otimizada
+          sleep 60
 
-      - name: Healthcheck Kafka (Robusto)
-        env:
-          STACK_NAME: conexao-kafka
+      - name: Healthcheck Kafka (Multi-método)
         run: |
-          echo "🔍 Validando saúde do Kafka com health checks robustos..."
-
-          # Aguardar até 4 minutos para Kafka ficar disponível
+          set -Eeuo pipefail
           timeout=240
           elapsed=0
           health_passed=false
-
           while [ $elapsed -lt $timeout ] && [ "$health_passed" = false ]; do
-            KAFKA_CONTAINER=$(docker ps -q -f name="${STACK_NAME}_kafka" | head -1)
+            kafka_container=$(docker ps -q -f name="${STACK_NAME}_kafka" | head -1)
 
-            if [ -n "$KAFKA_CONTAINER" ]; then
+            if [ -n "$kafka_container" ]; then
               echo "🔍 Testando health check do Kafka... ($elapsed/$timeout segundos)"
 
-              # Método 1: Tentar comando kafka-broker-api-versions
-              if docker exec "$KAFKA_CONTAINER" kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1; then
-                echo "✅ Kafka health check passed (API versions)"
+              if docker exec "$kafka_container" kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1; then
+                echo "✅ Kafka respondeu ao kafka-broker-api-versions"
                 health_passed=true
                 break
               fi
 
-              # Método 2: Verificar logs para "started (kafka.server.KafkaServer)"
-              if docker logs "$KAFKA_CONTAINER" 2>/dev/null | grep -q "started.*KafkaServer\|Kafka Server.*started"; then
-                echo "✅ Kafka health check passed (logs validation)"
+              if docker logs "$kafka_container" 2>/dev/null | grep -q "Kafka Server.*started"; then
+                echo "✅ Logs indicam que Kafka está pronto"
                 health_passed=true
                 break
               fi
 
-              # Método 3: Verificar se porta 9092 está ativa
-              if docker exec "$KAFKA_CONTAINER" ss -tuln 2>/dev/null | grep -q ":9092 "; then
-                echo "✅ Kafka health check passed (port 9092 active)"
+              if docker exec "$kafka_container" ss -tuln 2>/dev/null | grep -q ":9092"; then
+                echo "✅ Porta 9092 ativa dentro do container"
                 health_passed=true
                 break
               fi
 
               echo "⏳ Kafka ainda não está pronto... ($elapsed/$timeout segundos)"
             else
+              echo "ℹ️ Status atual das tarefas Kafka"
+              docker service ps "${STACK_NAME}_kafka" --no-trunc || true
               echo "⏳ Container Kafka ainda não encontrado... ($elapsed/$timeout segundos)"
             fi
 
@@ -199,49 +225,31 @@ jobs:
 
           if [ "$health_passed" = false ]; then
             echo "⚠️ Kafka health check não passou em $timeout segundos"
-            echo "🔍 Verificando logs finais do Kafka..."
-            if [ -n "$KAFKA_CONTAINER" ]; then
-              echo "--- Últimos 30 logs do Kafka ---"
-              docker logs "$KAFKA_CONTAINER" --tail 30 2>/dev/null || true
+            docker service ps "${STACK_NAME}_kafka" --no-trunc || true
+            if [ -n "$kafka_container" ]; then
+              echo "--- Últimos 40 logs do Kafka ---"
+              docker logs "$kafka_container" --tail 40 2>/dev/null || true
               echo "--- Fim dos logs ---"
             fi
-            echo "💡 Nota: Kafka pode estar funcionando mesmo com health check parcial"
-            echo "💡 Verifique os logs acima para diagnóstico"
-            # Não fazer exit 1 - permitir deploy continuar
-          else
-            echo "✅ Kafka health check concluído com sucesso!"
-          fi
-
-      - name: Connectivity Validation
-        env:
-          STACK_NAME: conexao-kafka
-        run: |
-          echo "🔗 Validando conectividade do Kafka..."
-
-          # Verificar se o serviço está listado no Swarm
-          if docker service ls | grep -q "${STACK_NAME}_kafka"; then
-            echo "✅ Serviço Kafka encontrado no Swarm"
-          else
-            echo "❌ Serviço Kafka não encontrado no Swarm"
             exit 1
           fi
 
-          # Verificar se está na rede correta
-          if docker network inspect conexao-network-swarm | grep -q kafka; then
-            echo "✅ Kafka conectado à rede overlay"
+      - name: 🔍 Connectivity Validation
+        run: |
+          set -Eeuo pipefail
+          echo "📊 Status final do serviço Kafka:"
+          docker service ls --filter name="${STACK_NAME}_kafka" --format "table {{.Name}}\t{{.Replicas}}\t{{.Image}}"
+
+          echo "🔗 Verificando rede overlay:"
+          if docker network inspect "$DOCKER_NETWORK_NAME" | grep -q kafka; then
+            echo "✅ Kafka referenciado na rede '$DOCKER_NETWORK_NAME'"
           else
-            echo "⚠️ Kafka pode não estar na rede overlay correta"
+            echo "⚠️ Kafka pode não estar listado explicitamente na rede '$DOCKER_NETWORK_NAME'"
           fi
 
-          # Verificar conectividade com Zookeeper (soft check)
-          KAFKA_CONTAINER=$(docker ps -q -f name="${STACK_NAME}_kafka" | head -1)
-          if [ -n "$KAFKA_CONTAINER" ]; then
-            if docker exec "$KAFKA_CONTAINER" nc -z conexao-zookeeper 2181 2>/dev/null; then
-              echo "✅ Kafka consegue conectar ao Zookeeper"
-            else
-              echo "⚠️ Kafka não consegue conectar ao Zookeeper (pode ser normal se Zookeeper estiver em outra stack)"
-            fi
+          echo "🗄️ Validando volume externo:"
+          if docker volume ls --format '{{.Name}}' | grep -Fxq "$KAFKA_DATA_VOLUME"; then
+            echo "✅ Volume '$KAFKA_DATA_VOLUME' disponível"
+          else
+            echo "⚠️ Volume '$KAFKA_DATA_VOLUME' não encontrado"
           fi
-
-          echo "📊 Status final dos serviços:"
-          docker service ls --filter name="${STACK_NAME}_*" --format "table {{.Name}}\t{{.Replicas}}\t{{.Image}}"

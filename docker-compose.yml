@@ -21,7 +21,7 @@ services:
   # 🔥 KAFKA - Event Streaming Platform
   # ============================================================================
   kafka:
-    image: confluentinc/cp-kafka:7.9.0
+    image: confluentinc/cp-kafka:7.9.1
     hostname: conexao-kafka
     user: "1000:1000"
     init: true

@@ -1,4 +1,4 @@
-name: "🚀 Kafka Infrastructure – CI/CD Pipeline"
+name: "🚀 Kafka Infrastructure - CI/CD Pipeline"
 
 on:
   push:

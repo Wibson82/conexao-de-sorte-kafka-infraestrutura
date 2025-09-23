@@ -43,6 +43,19 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_NUM_PARTITIONS: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      # Security Configuration
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      # Secrets via Docker Secrets
+      KAFKA_SASL_JAAS_CONFIG_FILE: "/run/secrets/KAFKA_JAAS_CONFIG"
+      KAFKA_SSL_KEYSTORE_CREDENTIALS_FILE: "/run/secrets/KAFKA_KEYSTORE_PASSWORD"
+      KAFKA_SSL_KEY_CREDENTIALS_FILE: "/run/secrets/KAFKA_SSL_KEY_PASSWORD"
+    secrets:
+      - KAFKA_JAAS_CONFIG
+      - KAFKA_KEYSTORE_PASSWORD
+      - KAFKA_SSL_KEY_PASSWORD
     networks:
       conexao-network-swarm:
         aliases:
@@ -56,21 +69,27 @@ services:
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 60s
-      timeout: 30s
+      test: [
+        "CMD-SHELL",
+        "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"
+      ]
+      interval: 45s
+      timeout: 20s
       retries: 5
-      start_period: 240s
+      start_period: 180s
     deploy:
       replicas: 1
       placement:
         constraints:
           - node.role == manager
+      # 🔗 DEPENDÊNCIAS IMPLÍCITAS
+      # Kafka precisa do Zookeeper ativo antes de iniciar
+      # Configurado via restart_policy para aguardar dependências
       restart_policy:
         condition: on-failure
-        delay: 30s
-        max_attempts: 5
-        window: 300s
+        delay: 60s  # Delay maior para aguardar Zookeeper
+        max_attempts: 10  # Mais tentativas para aguardar dependências
+        window: 600s  # Janela maior para estabilização
       update_config:
         parallelism: 1
         delay: 10s
@@ -86,6 +105,31 @@ services:
           memory: 1G
         reservations:
           memory: 512M
+
+    # ==========================================================================
+    # 🏷️ TRAEFIK LABELS - KAFKA MANAGEMENT (OPCIONAL)
+    # ==========================================================================
+    labels:
+      # Metadata do serviço
+      - "org.opencontainers.image.title=Conexão de Sorte - Kafka"
+      - "org.opencontainers.image.description=Event streaming platform"
+      - "org.opencontainers.image.version=7.9.1"
+      - "microservice.type=messaging"
+      - "microservice.category=infrastructure"
+
+# ============================================================================
+# 🔐 SECRETS EXTERNOS (Azure Key Vault)
+# ============================================================================
+secrets:
+  KAFKA_JAAS_CONFIG:
+    external: true
+    name: KAFKA_JAAS_CONFIG
+  KAFKA_KEYSTORE_PASSWORD:
+    external: true
+    name: KAFKA_KEYSTORE_PASSWORD
+  KAFKA_SSL_KEY_PASSWORD:
+    external: true
+    name: KAFKA_SSL_KEY_PASSWORD
 
 # ============================================================================
 # 📦 VOLUMES EXTERNOS

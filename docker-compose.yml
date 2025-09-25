@@ -48,14 +48,8 @@ services:
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
-      # Secrets via Docker Secrets
-      KAFKA_SASL_JAAS_CONFIG_FILE: "/run/secrets/KAFKA_JAAS_CONFIG"
-      KAFKA_SSL_KEYSTORE_CREDENTIALS_FILE: "/run/secrets/KAFKA_KEYSTORE_PASSWORD"
-      KAFKA_SSL_KEY_CREDENTIALS_FILE: "/run/secrets/KAFKA_SSL_KEY_PASSWORD"
-    secrets:
-      - KAFKA_JAAS_CONFIG
-      - KAFKA_KEYSTORE_PASSWORD
-      - KAFKA_SSL_KEY_PASSWORD
+      # Configuração simplificada para desenvolvimento
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       conexao-network-swarm:
         aliases:
@@ -118,18 +112,9 @@ services:
       - "microservice.category=infrastructure"
 
 # ============================================================================
-# 🔐 SECRETS EXTERNOS (Azure Key Vault)
+# 🔐 CONFIGURAÇÃO SIMPLIFICADA PARA DESENVOLVIMENTO
 # ============================================================================
-secrets:
-  KAFKA_JAAS_CONFIG:
-    external: true
-    name: KAFKA_JAAS_CONFIG
-  KAFKA_KEYSTORE_PASSWORD:
-    external: true
-    name: KAFKA_KEYSTORE_PASSWORD
-  KAFKA_SSL_KEY_PASSWORD:
-    external: true
-    name: KAFKA_SSL_KEY_PASSWORD
+# Secrets SSL removidos para compatibilidade com ambiente de desenvolvimento
 
 # ============================================================================
 # 📦 VOLUMES EXTERNOS

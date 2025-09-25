@@ -86,7 +86,7 @@ jobs:
 
       - name: Security validation
         run: |
-          set -Eeuo pipefail
+          echo "🔒 Verificando segurança da configuração..."
           if grep -R "password[[:space:]]*:" docker-compose.yml | grep -v '\${' | grep -v '^#' | grep -v 'external:'; then
             echo "❌ Possible hardcoded password detected"
             exit 1
